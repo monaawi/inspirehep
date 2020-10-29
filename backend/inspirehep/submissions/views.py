@@ -105,7 +105,43 @@ class AuthorSubmissionsResource(BaseSubmissionsResource):
         return self.start_workflow_for_submission()
 
     def put(self, pid_value):
-        return self.start_workflow_for_submission(pid_value)
+        try:
+            record = AuthorsRecord.get_record_by_pid_value(pid_value)
+            if not can_user_edit_record(record):
+                return (
+                    jsonify({"message": "You are not allowed to edit this author"}),
+                    403,
+                )
+        except PIDDoesNotExistError:
+            abort(404)
+        data = self.load_data_from_request()
+        updated_record_data = self.get_updated_record_data(data, record)
+        record.update(updated_record_data)
+        db.session.commit()
+
+        if not is_superuser_or_cataloger_logged_in():
+            self.create_ticket(record, "rt/update_seminar.html")
+
+        return jsonify({"pid_value": record["control_number"]})
+
+    def get_updated_record_data(self, update_data, record):
+        deletable_fields = [
+            "address",
+            "series",
+            "contact_details",
+            "urls",
+            "join_urls",
+            "abstract",
+            "keywords",
+            "public_notes",
+        ]
+
+        record_data = dict(record)
+        for field in deletable_fields:
+            if field not in update_data and field in record_data:
+                del record_data[field]
+        record_data.update(update_data)
+        return record_data
 
     def load_data_from_request(self):
         return author_loader_v1()
@@ -194,6 +230,7 @@ class SeminarSubmissionsResource(BaseSubmissionsResource):
     def put(self, pid_value):
         try:
             record = SeminarsRecord.get_record_by_pid_value(pid_value)
+            # check if we need to check the orcid in the acquisiton source or the one in ids
             if not can_user_edit_record(record):
                 return (
                     jsonify({"message": "You are not allowed to edit this seminar"}),
